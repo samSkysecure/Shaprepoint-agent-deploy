@@ -1,0 +1,30 @@
+{
+    "template1": {
+    "agentSlug": "teamsagent",
+    "customerSlug": "contoso",
+    "location": "southindia",
+    "agentImage": "docintelagent.azurecr.io/docintelagent:v2",
+    "acrServer": "docintelagent.azurecr.io",
+    "acrUsername": "<acr-admin-username>",
+    "acrPassword": "<from-keyvault>",
+    "microsoftAppId": "<app-registration-client-id>",
+    "microsoftAppPassword": "<from-keyvault>",
+    "customerTenantId": "<customer-tenant-id>",
+    "azureDocumentIntelKey": "<from-keyvault>",
+    "azureDocumentIntelEndpoint": "https://<resource>.cognitiveservices.azure.com/",
+    "msClientId": "<graph-client-id>",
+    "msClientSecret": "<from-keyvault>",
+    "redisHost": "<redis-host-url>",
+    "redisPassword": "<from-keyvault>",
+    "langchainApiKey": "<from-keyvault>"
+}
+,
+    "template2": {
+        "agentSlug": "teamsagent",
+        "customerSlug": "contoso",
+        "botDisplayName": "Document Intelligence Agent",
+        "msaAppId": "<app-registration-client-id>",
+        "containerAppFQDN": "<output-from-template1>",
+        "sku": "F0"
+    }
+}

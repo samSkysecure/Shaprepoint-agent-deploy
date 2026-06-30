@@ -1,0 +1,146 @@
+# TeamsFx files
+env/.env.*.user
+env/.env.local
+env/.env.playground
+.env
+*.env
+appPackage/build
+
+# python virtual environment
+.venv/
+__pycache__/
+
+# others
+.deployment/
+node_modules/
+devTools/*.log
+
+# Dev tool directories
+/devTools/
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# Testing & Coverage
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+
+# =========================
+# Build Artifacts
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# IDEs & Editors
+# =========================
+.vscode/
+.idea/
+*.code-workspace
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Azure
+# =========================
+.azure/
+
+# Azure CLI cache
+.azureclitask/
+
+# ARM/Bicep deployment outputs
+deployment-output.json
+*.parameters.generated.json
+
+# =========================
+# Secrets & Certificates
+# =========================
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.cer
+
+# =========================
+# Local Databases
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Temporary Files
+# =========================
+tmp/
+temp/
+*.tmp
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# PowerShell
+# =========================
+*.ps1xml
+
+# =========================
+# Generated Files
+# =========================
+generated_manifests/
+*.zip
+
+# =========================
+# Terraform (if added later)
+# =========================
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+
+# =========================
+# Node.js (if used later)
+# =========================
+node_modules/
+npm-debug.log*
+yarn-error.log*

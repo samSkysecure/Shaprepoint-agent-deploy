@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Onboarding | Agent Factory</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Configuration Panel -->
+        <aside class="config-panel glass">
+            <header>
+                <h2>Onboarding Flow</h2>
+                <p>Follow these steps to deploy the agent</p>
+            </header>
+
+            <!-- Step 1 (Static details) -->
+            <div class="step-card">
+                <div class="step-header">
+                    <span class="step-badge">Step 1</span>
+                    <h4>Skysecure App ID</h4>
+                </div>
+                <p class="step-desc">Copy this App ID to register the bot identity.</p>
+                <div class="code-box" style="margin-top: 8px;">
+                    <span id="sp-client-id" style="font-size:0.8rem; font-family:'Fira Code',monospace;">Loading...</span>
+                    <button type="button" id="copy-sp-btn">Copy</button>
+                </div>
+            </div>
+            
+            <form id="onboard-form">
+                <!-- Step 2 -->
+                <div class="step-card">
+                    <div class="step-header">
+                        <span class="step-badge">Step 2</span>
+                        <h4>Admin Consent</h4>
+                    </div>
+                    <p class="step-desc">Enter Tenant ID first, then run the consent flow in your browser.</p>
+                    
+                    <div class="form-group" style="margin-top: 8px; margin-bottom: 8px;">
+                        <label style="font-size: 0.75rem;">Tenant ID</label>
+                        <input type="text" id="tenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
+                    </div>
+                    
+                    <div class="consent-action-box" style="margin-top: 8px;">
+                        <a id="btn-admin-consent" href="#" target="_blank" class="btn-connect disabled" style="display: block; text-align: center; text-decoration: none; line-height: 2.2;">Grant Admin Consent</a>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="step-card">
+                    <div class="step-header">
+                        <span class="step-badge">Step 3</span>
+                        <h4>Assign Contributor Role</h4>
+                    </div>
+                    <p class="step-desc">In Azure Portal, open your <strong>Resource Group</strong> &rarr; <strong>Access Control (IAM)</strong>, add role assignment for <strong>Contributor</strong>, and search/assign this app registration.</p>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="step-card">
+                    <div class="step-header">
+                        <span class="step-badge">Step 4</span>
+                        <h4>Configure & Deploy</h4>
+                    </div>
+                    <p class="step-desc">Ensure roles are assigned, then fetch details and launch deployment.</p>
+
+                    <div style="margin-top: 12px;">
+                        <button type="button" id="btn-fetch-azure" class="btn-connect" style="width: 100%; margin-bottom: 12px;">Connect & Fetch Azure Resources</button>
+                        <div id="azure-connect-alert" class="form-alert hidden" style="margin-bottom: 12px;"></div>
+                        
+                        <!-- Toggle for Manual Entry vs Dropdowns -->
+                        <div class="form-checkbox" style="margin-bottom: 12px;">
+                            <input type="checkbox" id="manualInputToggle" style="width: auto; margin-right: 8px; cursor: pointer;">
+                            <label for="manualInputToggle" style="display: inline; text-transform: none; letter-spacing: normal; font-size: 0.8rem; color: var(--text-secondary); cursor: pointer;">Enter IDs manually</label>
+                        </div>
+
+                        <!-- Onboarding Config Form Details -->
+                        <div class="form-group" id="subscription-group">
+                            <label>Subscription</label>
+                            <select id="subscriptionIdSelect" class="required-field">
+                                <option value="">-- Connect Tenant First --</option>
+                            </select>
+                            <input type="text" id="subscriptionIdInput" class="hidden required-field" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                        </div>
+
+                        <div class="form-group" id="resourcegroup-group">
+                            <label>Resource Group</label>
+                            <select id="resourceGroupNameSelect" class="required-field" disabled>
+                                <option value="">-- Select Subscription First --</option>
+                            </select>
+                            <input type="text" id="resourceGroupNameInput" class="hidden required-field" placeholder="resource-group-name">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Environment ID</label>
+                            <input type="text" id="environmentId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
+                        </div>
+                        <div class="form-group">
+                            <label>SharePoint Site URL</label>
+                            <input type="url" id="sharePointSiteUrl" placeholder="https://contoso.sharepoint.com/sites/your-site" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Customer Slug</label>
+                                <input type="text" id="customerSlug" placeholder="customer-slug" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Agent Slug</label>
+                                <input type="text" id="agentSlug" placeholder="agent-slug" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Bot Display Name</label>
+                            <input type="text" id="botDisplayName" placeholder="Display name in Teams">
+                        </div>
+                        <button type="submit" id="deploy-btn" class="btn-primary">
+                            <span class="btn-text">Start Onboarding</span>
+                            <span class="loader hidden"></span>
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </aside>
+
+        <!-- Main Terminal Panel -->
+        <main class="terminal-panel glass">
+            <div class="terminal-header">
+                <div class="window-controls">
+                    <span class="dot close"></span>
+                    <span class="dot min"></span>
+                    <span class="dot max"></span>
+                </div>
+                <div class="terminal-title">Deployment Console</div>
+            </div>
+            <div class="terminal-body" id="terminal-output">
+                <div class="log-line system">Waiting for deployment configuration...</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Success Modal -->
+    <div id="success-modal" class="modal hidden">
+        <div class="modal-content glass">
+            <h2 style="margin-bottom: 8px;">Onboarding Complete!</h2>
+            <p style="margin-bottom: 24px;">The agent has been fully deployed to Azure and Power Platform.</p>
+            
+            <div class="auth-steps">
+                <div class="step">
+                    <span class="step-num" style="background: #10b981; box-shadow: 0 2px 10px rgba(16, 185, 129, 0.4);">1</span>
+                    <span>Download the generated Teams Manifest:</span>
+                    <a id="download-manifest-btn" href="#" class="btn-primary" style="margin-top:8px; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);">Download Manifest .ZIP</a>
+                </div>
+                <div class="step">
+                    <span class="step-num" style="background: #3b82f6; box-shadow: 0 2px 10px rgba(59, 130, 246, 0.4);">2</span>
+                    <span>Upload to Teams Admin Center:</span>
+                    <div style="font-size:0.9rem; color:#cbd5e1; margin-top:8px; background: rgba(0,0,0,0.4); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                        1. Go to <a href="https://admin.teams.microsoft.com/" target="_blank" style="color:#a855f7; font-weight: 600;">admin.teams.microsoft.com</a><br><br>
+                        2. Navigate to <b>Teams apps</b> > <b>Manage apps</b><br><br>
+                        3. Click <b>Upload new app</b> and select the downloaded zip file.<br><br>
+                        4. The agent is now available for your customer!
+                    </div>
+                </div>
+            </div>
+            
+            <button id="close-success-btn" class="btn-secondary" style="margin-top: 24px;">Close Dashboard</button>
+        </div>
+    </div>
+
+    <!-- Device Code Auth Modal -->
+    <div id="auth-modal" class="modal hidden">
+        <div class="modal-content glass">
+            <h2>Action Required</h2>
+            <p>Microsoft requires device authentication to securely create connections.</p>
+            
+            <div class="auth-steps">
+                <div class="step">
+                    <span class="step-num">1</span>
+                    <span>Copy this secure code:</span>
+                    <div class="code-box">
+                        <span id="device-code-text">XXXXXXX</span>
+                        <button id="copy-btn">Copy</button>
+                    </div>
+                </div>
+                <div class="step">
+                    <span class="step-num">2</span>
+                    <span>Open the Microsoft login page and enter the code.</span>
+                    <a id="device-code-link" href="#" target="_blank" class="btn-secondary">Open Login Page</a>
+                </div>
+            </div>
+            
+            <p class="waiting-text">Waiting for you to complete login...</p>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
