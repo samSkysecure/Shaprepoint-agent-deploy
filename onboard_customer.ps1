@@ -39,7 +39,10 @@ param (
     [string]$SharePointSiteUrl,
 
     [Parameter(Mandatory=$false)]
-    [string]$BotDisplayName
+    [string]$BotDisplayName,
+
+    [Parameter(Mandatory=$false)]
+    [string]$PowerPlatformTenantId = "d7ab1225-4649-4cb3-abd5-bc732bed3203"
 )
 
 if ([string]::IsNullOrWhiteSpace($BotDisplayName)) {
@@ -114,7 +117,7 @@ $bodyPa = @{
     scope         = "https://api.powerapps.com/.default"
 }
 try {
-    $paTokenResponse = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $bodyPa
+    $paTokenResponse = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$PowerPlatformTenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $bodyPa
     $paToken = $paTokenResponse.access_token
 } catch {
     Write-Host "Warning: Could not fetch PowerApps token. Falling back to manual connection IDs."
@@ -213,7 +216,7 @@ Write-Host "====================================================================
 $pacClientId = "1950a258-227b-4e31-a9cf-717495945fc2"
 $bapScope = "https://management.core.windows.net/.default"
 $deviceCodeBody = @{ client_id = $pacClientId; scope = "$bapScope offline_access" }
-$deviceCodeRes = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode" -ContentType "application/x-www-form-urlencoded" -Body $deviceCodeBody
+$deviceCodeRes = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$PowerPlatformTenantId/oauth2/v2.0/devicecode" -ContentType "application/x-www-form-urlencoded" -Body $deviceCodeBody
 
 Write-Host "`n>>> Please open: $($deviceCodeRes.verification_uri)"
 Write-Host ">>> Enter the code: $($deviceCodeRes.user_code) (copied to clipboard!)"
@@ -229,7 +232,7 @@ while ($null -eq $userToken) {
         device_code = $deviceCodeRes.device_code
     }
     try {
-        $tokenRes = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $tokenBody
+        $tokenRes = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$PowerPlatformTenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $tokenBody
         $userToken = $tokenRes.access_token
     } catch { }
 }
@@ -247,7 +250,7 @@ $customConnectorRef = $settings.ConnectionReferences | Where-Object { $_.Connect
 
 $customConnectorId = $customConnectorRef.ConnectorId.Split("/")[-1]
 $customConnGuid = [guid]::NewGuid().ToString("N")
-$envGuid = "Default-$TenantId"
+$envGuid = "Default-$PowerPlatformTenantId"
 
 $apiHeaders = @{
     "Authorization" = "Bearer $userToken"
