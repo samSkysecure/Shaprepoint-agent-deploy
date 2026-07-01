@@ -30,7 +30,7 @@ param (
     [string]$CustomerSubscriptionId,
 
     [Parameter(Mandatory=$false)]
-    [string]$AgentImageTag = "latest",
+    [string]$AgentImageTag = "v1",
 
     [Parameter(Mandatory=$false)]
     [string]$OrchestratorUrl = "http://localhost:8000",
@@ -48,6 +48,48 @@ if ([string]::IsNullOrWhiteSpace($BotDisplayName)) {
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-RestMethodWithDetails {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$Method,
+        [Parameter(Mandatory=$true)]
+        [string]$Uri,
+        [Parameter(Mandatory=$false)]
+        [string]$ContentType,
+        [Parameter(Mandatory=$false)]
+        $Body,
+        [Parameter(Mandatory=$false)]
+        $Headers
+    )
+    $params = @{
+        Method = $Method
+        Uri = $Uri
+    }
+    if ($ContentType) { $params["ContentType"] = $ContentType }
+    if ($Body) { $params["Body"] = $Body }
+    if ($Headers) { $params["Headers"] = $Headers }
+
+    try {
+        Invoke-RestMethod @params
+    } catch {
+        Write-Host "HTTP Request Failed: $Method $Uri" -ForegroundColor Red
+        if ($_.Exception.Response) {
+            try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $reader.BaseStream.Position = 0
+                $errorBody = $reader.ReadToEnd()
+                Write-Host "HTTP Status: $($_.Exception.Response.StatusCode)" -ForegroundColor Red
+                Write-Host "Error Body: $errorBody" -ForegroundColor Red
+            } catch {
+                Write-Host "Failed to read HTTP error response body." -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "Exception details: $_" -ForegroundColor Red
+        }
+        throw
+    }
+}
+
 Write-Host "====================================================="
 Write-Host "  SKYSECURE - ZERO-TOUCH ONBOARDING PIPELINE"
 Write-Host "====================================================="
@@ -62,7 +104,7 @@ $bodyAz = @{
     grant_type    = "client_credentials"
     scope         = "https://management.azure.com/.default"
 }
-$azTokenResponse = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $bodyAz
+$azTokenResponse = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $bodyAz
 $azToken = $azTokenResponse.access_token
 
 $bodyPa = @{
@@ -72,7 +114,7 @@ $bodyPa = @{
     scope         = "https://api.powerapps.com/.default"
 }
 try {
-    $paTokenResponse = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $bodyPa
+    $paTokenResponse = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $bodyPa
     $paToken = $paTokenResponse.access_token
 } catch {
     Write-Host "Warning: Could not fetch PowerApps token. Falling back to manual connection IDs."
@@ -97,14 +139,14 @@ $deployPayload = @{
     bot_sku = "F0"
 } | ConvertTo-Json
 
-$deployResponse = Invoke-RestMethod -Method Post -Uri "$OrchestratorUrl/deployments" -ContentType "application/json" -Body $deployPayload
+$deployResponse = Invoke-RestMethodWithDetails -Method Post -Uri "$OrchestratorUrl/deployments" -ContentType "application/json" -Body $deployPayload
 $deploymentId = $deployResponse.deployment_id
 
 Write-Host "Deployment Queued. ID: $deploymentId. Polling for completion..."
 $containerAppFQDN = $null
 while ($true) {
     Start-Sleep -Seconds 10
-    $statusResponse = Invoke-RestMethod -Method Get -Uri "$OrchestratorUrl/deployments/$deploymentId"
+    $statusResponse = Invoke-RestMethodWithDetails -Method Get -Uri "$OrchestratorUrl/deployments/$deploymentId"
     
     Write-Host "Status: $($statusResponse.status)"
     if ($statusResponse.status -eq "succeeded") {
@@ -151,16 +193,9 @@ if (-not (Test-Path $injectedZipPath)) {
 # 4. IMPORT CONNECTOR SOLUTION
 # ---------------------------------------------------------
   Write-Host "`n[4/6] Authenticating to Power Platform (PAC CLI)..."
-  $orgSelectOutput = pac org select --environment $EnvironmentId 2>&1
-  
-  if ($LASTEXITCODE -ne 0 -or $orgSelectOutput -match "Error" -or $orgSelectOutput -match "No profiles were found" -or $orgSelectOutput -match "Cannot find environment") {
-      Write-Host "No active profile found for this environment. Initiating Device Code authentication..."
-      # This will output "To sign in, use a web browser to open the page..."
-      pac auth create --environment $EnvironmentId --deviceCode
-      Write-Host "Successfully authenticated!"
-  } else {
-      Write-Host $orgSelectOutput
-  }
+  Write-Host "Initiating Device Code authentication..."
+  pac auth create --environment $EnvironmentId --deviceCode
+  Write-Host "Successfully authenticated!"
 
 Write-Host "Importing Injected Connector Solution ($injectedZipPath)..."
 pac solution import --path $injectedZipPath --force-overwrite --activate-plugins
@@ -178,7 +213,7 @@ Write-Host "====================================================================
 $pacClientId = "1950a258-227b-4e31-a9cf-717495945fc2"
 $bapScope = "https://management.core.windows.net/.default"
 $deviceCodeBody = @{ client_id = $pacClientId; scope = "$bapScope offline_access" }
-$deviceCodeRes = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode" -ContentType "application/x-www-form-urlencoded" -Body $deviceCodeBody
+$deviceCodeRes = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/devicecode" -ContentType "application/x-www-form-urlencoded" -Body $deviceCodeBody
 
 Write-Host "`n>>> Please open: $($deviceCodeRes.verification_uri)"
 Write-Host ">>> Enter the code: $($deviceCodeRes.user_code) (copied to clipboard!)"
@@ -194,7 +229,7 @@ while ($null -eq $userToken) {
         device_code = $deviceCodeRes.device_code
     }
     try {
-        $tokenRes = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $tokenBody
+        $tokenRes = Invoke-RestMethodWithDetails -Method Post -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" -ContentType "application/x-www-form-urlencoded" -Body $tokenBody
         $userToken = $tokenRes.access_token
     } catch { }
 }
@@ -222,7 +257,7 @@ $apiHeaders = @{
 Write-Host "`nResolving actual Custom Connector API Name in Dataverse..."
 $filterQuery = [uri]::EscapeDataString("environment eq '$envGuid'")
 $apisUri = "https://api.powerapps.com/providers/Microsoft.PowerApps/apis?api-version=2020-06-01&`$filter=$filterQuery"
-$apisResponse = Invoke-RestMethod -Method Get -Uri $apisUri -Headers $apiHeaders
+$apisResponse = Invoke-RestMethodWithDetails -Method Get -Uri $apisUri -Headers $apiHeaders
 
 $actualApi = $apisResponse.value | Where-Object { $_.name -match "docgen-20sharepoint-20connector" -and $_.name -match "shared_" } | Select-Object -First 1
 
@@ -241,7 +276,7 @@ $customConnPayload = @{
     }
 }
 $putUri = "https://api.powerapps.com/providers/Microsoft.PowerApps/apis/$actualApiId/connections/$customConnGuid`?api-version=2020-06-01"
-Invoke-RestMethod -Method Put -Uri $putUri -Headers $apiHeaders -Body ($customConnPayload | ConvertTo-Json -Depth 5) | Out-Null
+Invoke-RestMethodWithDetails -Method Put -Uri $putUri -Headers $apiHeaders -Body ($customConnPayload | ConvertTo-Json -Depth 5) | Out-Null
 Write-Host "Custom Connector connection successfully created! ID: $customConnGuid"
 
 Write-Host "`nBinding Connections to settings.json..."
@@ -265,7 +300,7 @@ pac solution publish
 # ---------------------------------------------------------
 Write-Host "`n[6/6] Auto-fetching Flow Webhook URL..."
 $flowsUri = "https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/$envGuid/flows?api-version=2016-11-01"
-$flowsResponse = Invoke-RestMethod -Method Get -Uri $flowsUri -Headers $apiHeaders
+$flowsResponse = Invoke-RestMethodWithDetails -Method Get -Uri $flowsUri -Headers $apiHeaders
 
 $docGenFlow = $flowsResponse.value | Where-Object { $_.properties.displayName -match "docgen flow" -or $_.properties.displayName -match "request_trigger" } | Select-Object -First 1
 
@@ -276,7 +311,7 @@ if (-not $docGenFlow) {
 $flowId = $docGenFlow.name
 $triggerName = "manual"
 $callbackUri = "https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/$envGuid/flows/$flowId/triggers/$triggerName/listCallbackUrl?api-version=2016-11-01"
-$callbackResponse = Invoke-RestMethod -Method Post -Uri $callbackUri -Headers @{ "Authorization" = "Bearer $userToken"; "Content-Type" = "application/json" } -Body "{}"
+$callbackResponse = Invoke-RestMethodWithDetails -Method Post -Uri $callbackUri -Headers @{ "Authorization" = "Bearer $userToken"; "Content-Type" = "application/json" } -Body "{}"
 
 Write-Host "Raw Callback Response: " ($callbackResponse | ConvertTo-Json -Depth 5)
 
@@ -309,7 +344,7 @@ if (-not [string]::IsNullOrWhiteSpace($flowTriggerUrl) -or -not [string]::IsNull
     $azUpdateUri = "https://management.azure.com/subscriptions/$CustomerSubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.App/containerApps/$containerAppName`?api-version=2023-05-01"
     
     try {
-        $caState = Invoke-RestMethod -Method Get -Uri $azUpdateUri -Headers @{ "Authorization" = "Bearer $azToken" }
+        $caState = Invoke-RestMethodWithDetails -Method Get -Uri $azUpdateUri -Headers @{ "Authorization" = "Bearer $azToken" }
         
         $envVars = $caState.properties.template.containers[0].env
         
@@ -339,7 +374,7 @@ if (-not [string]::IsNullOrWhiteSpace($flowTriggerUrl) -or -not [string]::IsNull
             }
         }
         
-        Invoke-RestMethod -Method Patch -Uri $azUpdateUri -Headers @{ "Authorization" = "Bearer $azToken"; "Content-Type" = "application/json" } -Body ($patchPayload | ConvertTo-Json -Depth 10)
+        Invoke-RestMethodWithDetails -Method Patch -Uri $azUpdateUri -Headers @{ "Authorization" = "Bearer $azToken"; "Content-Type" = "application/json" } -Body ($patchPayload | ConvertTo-Json -Depth 10)
         Write-Host "Container App successfully updated with the Environment Variables!"
     } catch {
         Write-Host "Warning: Failed to update Container App. Error: $_"
