@@ -7,12 +7,16 @@ or via this Settings object - never via os.environ directly.
 """
 from functools import lru_cache
 from typing import List
-from pydantic import field_validator
+from pydantic import Field, AliasChoices, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
     # Skysecure's shared App Registration - used as msaAppId/microsoftAppId
     # in every customer's Bot Service and Container App
@@ -32,7 +36,8 @@ class Settings(BaseSettings):
     # Azure OpenAI - shared across all SOP 1 customers
     # Not used by SOP 5 (Copilot Studio provides the LLM)
     azure_openai_api_key: str = ""
-    azure_openai_endpoints: str = ""
+    azure_openai_endpoints: str = Field("", validation_alias=AliasChoices("azure_openai_endpoints", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_ENDPOINTS"))
+    azure_openai_endpoint: str = Field("", validation_alias=AliasChoices("azure_openai_endpoint", "AZURE_OPENAI_ENDPOINT"))
     azure_openai_deployment_name: str = ""
     azure_openai_api_version: str = "2024-05-01-preview"
 
@@ -53,23 +58,20 @@ class Settings(BaseSettings):
     
     AZURE_DOCUMENT_INTEL_KEY: str
     AZURE_DOCUMENT_INTEL_ENDPOINT: str
-    AZURE_DOCUMENT_INTEL_MODEL: str
+    AZURE_DOCUMENT_INTEL_MODEL: str = "prebuilt-layout"
 
     # ── PII Compliance ───────────────────────────────────────────────────────
     PRESIDIO_NLP_ENGINE: str = "spacy"
     PRESIDIO_MODEL_NAME: str = "en_core_web_lg"
 
     # ── Microsoft Graph Authentication ───────────────────────────────────────
-    MSTENANT_ID: str
-    MSCLIENT_ID: str
-    MSCLIENT_SECRET: str
-    MS_AUTHORITY_BASE: str
-    GRAPH_SCOPE: str
-    GRAPH_URL: str
-    GRAPH_BASE_URL: str
+    MS_AUTHORITY_BASE: str = "https://login.microsoftonline.com"
+    GRAPH_SCOPE: str = "https://graph.microsoft.com/.default"
+    GRAPH_URL: str = "https://graph.microsoft.com/v1.0/shares/{share_id}/driveItem/content"
+    GRAPH_BASE_URL: str = "https://graph.microsoft.com/v1.0"
 
     # ── Authentication Lifespan & Token Scopes ─────────────────────────────────
-    GRAPH_TOKEN_BUFFER_SECONDS: int
+    GRAPH_TOKEN_BUFFER_SECONDS: int = 60
 
     # ── Graph Scopes & Extensions ────────────────────────────────────────────
     GRAPH_SCOPES: str = ""
@@ -83,14 +85,14 @@ class Settings(BaseSettings):
         ]
 
     # ── Redis Configuration ─────────────────────────────────────────────────
-    REDIS_HOST: str
+    REDIS_HOST: str = Field(validation_alias=AliasChoices("REDIS_HOST", "REDIS_URL"))
     REDIS_PORT: int
     REDIS_USERNAME: str
-    REDIS_PASSWORD: str
+    REDIS_PASSWORD: str = Field(validation_alias=AliasChoices("REDIS_PASSWORD", "REDIS_KEY"))
     REDIS_SSL: bool = False
-    REDIS_SESSION_TTL: int
-    REDIS_DOC_TTL: int
-    REDIS_CHECKPOINT_TTL: int
+    REDIS_SESSION_TTL: int = 86400
+    REDIS_DOC_TTL: int = 3600
+    REDIS_CHECKPOINT_TTL: int = 86400
 
     # ── Cache Configuration ──────────────────────────────────────────────────
     CACHE_MAX_ENTRIES: int = 1000
@@ -107,51 +109,52 @@ class Settings(BaseSettings):
         return int(v)
 
     # ── Teams Message Handling ─────────────────────────────────────────────
-    MAX_TEAMS_MESSAGE: int
+    MAX_TEAMS_MESSAGE: int = 3600
 
 
     # ── Rate Limiting ──────────────────────────────────────────────────────
-    RATE_WINDOW_SECONDS: int
-    RATE_LIMIT_REQUESTS: int
+    RATE_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_REQUESTS: int = 30
 
     # ── Langsmith Tracing ──────────────────────────────────────────────────
     LANGCHAIN_API_KEY: str = ""
+    LANGCHAIN_PROJECT: str = "document_intel"
 
 
     # ── Background Task Configuration ────────────────────────────────────────
-    MAX_CONCURRENT_BG_TASKS: int
-    BG_TASK_TIMEOUT_SECONDS: int
-    DOC_PROCESSING_BG_TASK_TIMEOUT_SECONDS: int
-    DOC_SUMMARY_TIMEOUT_SECONDS: int
-    DEFAULT_FILENAME: str
+    MAX_CONCURRENT_BG_TASKS: int = 5
+    BG_TASK_TIMEOUT_SECONDS: int = 500
+    DOC_PROCESSING_BG_TASK_TIMEOUT_SECONDS: int = 3600
+    DOC_SUMMARY_TIMEOUT_SECONDS: int = 800
+    DEFAULT_FILENAME: str = "document"
 
 
     # ── File Generation ─────────────────────────────────────────────────────
     TEMP_FILE_TTL_SECONDS: int = 3600  # Default to 1 hour
-    FILE_DOWNLOAD_BASE_URL: str
+    FILE_DOWNLOAD_BASE_URL: str = ""
     FILE_GENERATION_MAX_SIZE_MB: int = 50
     FILE_GENERATION_ENABLED: bool = True
 
-    AZURE_STORAGE_SAS_URL: str | None = None
+    AZURE_STORAGE_SAS_URL: str | None = Field(None, validation_alias=AliasChoices("AZURE_STORAGE_SAS_URL", "AZURE_BLOB_SAS_URL"))
     AZURE_STORAGE_CONNECTION_STRING: str | None = None
-    AZURE_STORAGE_CONTAINER_NAME: str
+    AZURE_STORAGE_CONTAINER_NAME: str = Field(validation_alias=AliasChoices("AZURE_STORAGE_CONTAINER_NAME", "AZURE_BLOB_CONTAINER"))
 
     # ── Copilot Studio Power Automate Flow Integration ───────────────────────
     COPILOT_FLOW_URL: str = ""
     COPILOT_FLOW_ENABLED: bool = True
 
     # ── Production-grade Chunking Configuration ─────────────────────────────
-    CHUNKING_MAX_SECTION_SIZE: int
-    CHUNKING_OVERLAP_SIZE: int
-    CHUNKING_MIN_PARAGRAPH_COUNT: int
-    CHUNKING_DENSITY_SAMPLE_SIZE: int
-    CHUNKING_WORKER_COUNT: int
+    CHUNKING_MAX_SECTION_SIZE: int = 3000
+    CHUNKING_OVERLAP_SIZE: int = 200
+    CHUNKING_MIN_PARAGRAPH_COUNT: int = 2
+    CHUNKING_DENSITY_SAMPLE_SIZE: int = 500
+    CHUNKING_WORKER_COUNT: int = 4
     DOC_MAX_PARALLEL_WORKERS: int = 32
 
     # ── Density Validation Thresholds ────────────────────────────────────────
-    DENSITY_MIN_ALPHABETIC_RATIO: float
-    DENSITY_MIN_WORD_ENTROPY: float
-    DENSITY_MAX_REPEATED_TOKEN_RATIO: float
+    DENSITY_MIN_ALPHABETIC_RATIO: float = 0.3
+    DENSITY_MIN_WORD_ENTROPY: float = 1.5
+    DENSITY_MAX_REPEATED_TOKEN_RATIO: float = 0.3
 
     # ── Computed Properties ─────────────────────────────────────────────────
     @property

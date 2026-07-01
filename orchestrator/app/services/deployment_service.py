@@ -75,7 +75,7 @@ def _step_provision_sharepoint(
 
     logger.info("Provisioning SharePoint structure on site: %s", site_url)
 
-    token = _get_graph_token(settings)
+    token = _get_graph_token(settings, req.customer_tenant_id)
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
@@ -110,15 +110,15 @@ def _step_provision_sharepoint(
     )
 
 
-def _get_graph_token(settings: Settings) -> str:
+def _get_graph_token(settings: Settings, tenant_id: str) -> str:
     """Acquire a Graph API token using the SPN client credentials."""
-    url = f"https://login.microsoftonline.com/{settings.MSTENANT_ID}/oauth2/v2.0/token"
+    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     response = httpx.post(
         url,
         data={
             "grant_type": "client_credentials",
-            "client_id": settings.MSCLIENT_ID,
-            "client_secret": settings.MSCLIENT_SECRET,
+            "client_id": settings.skysecure_app_id,
+            "client_secret": settings.skysecure_app_secret,
             "scope": "https://graph.microsoft.com/.default",
         },
         timeout=30,
@@ -255,19 +255,22 @@ def _step_deploy_container_app(
         "microsoftAppId": settings.skysecure_app_id,
         "microsoftAppPassword": settings.skysecure_app_secret,
         "customerTenantId": req.customer_tenant_id,
-        "msClientId": settings.MSCLIENT_ID,
-        "msClientSecret": settings.MSCLIENT_SECRET,
+        "msClientId": settings.skysecure_app_id,
+        "msClientSecret": settings.skysecure_app_secret,
         "redisHost": settings.REDIS_HOST,
+        "redisPort": str(settings.REDIS_PORT),
         "redisPassword": settings.REDIS_PASSWORD,
         "langchainApiKey": settings.LANGCHAIN_API_KEY,
+        "langchainProject": settings.LANGCHAIN_PROJECT,
         "azureDocumentIntelKey": settings.AZURE_DOCUMENT_INTEL_KEY,
         "azureDocumentIntelEndpoint": settings.AZURE_DOCUMENT_INTEL_ENDPOINT,
-        "azureOpenAiApiKey": "dummy-value-not-used",
-        "azureOpenAiEndpoint": "https://dummy-endpoint.com",
-        "azureOpenAiDeploymentName": "dummy-deployment",
+        "azureOpenAiApiKey": settings.azure_openai_api_key,
+        "azureOpenAiEndpoint": settings.azure_openai_endpoint or settings.azure_openai_endpoints,
+        "azureOpenAiDeploymentName": settings.azure_openai_deployment_name,
         "azureOpenAiApiVersion": settings.azure_openai_api_version,
         "fileDownloadBaseUrl": settings.FILE_DOWNLOAD_BASE_URL,
         "azureStorageContainerName": settings.AZURE_STORAGE_CONTAINER_NAME,
+        "azureBlobSasUrl": settings.AZURE_STORAGE_SAS_URL,
     }
 
     outputs = client.deploy_at_resource_group_scope(

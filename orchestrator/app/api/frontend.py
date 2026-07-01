@@ -75,7 +75,7 @@ async def run_powershell_script(task_id: str, req: OnboardRequest):
         "-SolutionZipPath", req.solutionZip,
         "-CustomerSlug", req.customerSlug,
         "-AgentSlug", req.agentSlug,
-        "-AgentImageTag", "latest",
+        "-AgentImageTag", "v1",
         "-ResourceGroupName", req.resourceGroupName,
         "-SharePointSiteUrl", req.sharePointSiteUrl
     ]

@@ -96,6 +96,20 @@
         "azureStorageContainerName": {
             "type": "string",
             "metadata": { "description": "Azure Storage Container Name" }
+        },
+        "azureBlobSasUrl": {
+            "type": "string",
+            "metadata": { "description": "Azure Blob SAS URL" }
+        },
+        "redisPort": {
+            "type": "string",
+            "defaultValue": "11749",
+            "metadata": { "description": "Redis Cache Port" }
+        },
+        "langchainProject": {
+            "type": "string",
+            "defaultValue": "document_intel",
+            "metadata": { "description": "LangChain Project Name" }
         }
     },
     "variables": {
@@ -107,7 +121,8 @@
         "msClientSecretRef": "ms-client-secret",
         "redisPasswordSecretRef": "redis-password",
         "langchainKeySecretRef": "langchain-key",
-        "azureOpenAiKeySecretRef": "azure-openai-key"
+        "azureOpenAiKeySecretRef": "azure-openai-key",
+        "azureBlobSasUrlSecretRef": "azure-blob-sas-url"
     },
     "resources": [
         {
@@ -138,7 +153,8 @@
                         { "name": "[variables('msClientSecretRef')]", "value": "[parameters('msClientSecret')]" },
                         { "name": "[variables('redisPasswordSecretRef')]", "value": "[parameters('redisPassword')]" },
                         { "name": "[variables('langchainKeySecretRef')]", "value": "[parameters('langchainApiKey')]" },
-                        { "name": "[variables('azureOpenAiKeySecretRef')]", "value": "[parameters('azureOpenAiApiKey')]" }
+                        { "name": "[variables('azureOpenAiKeySecretRef')]", "value": "[parameters('azureOpenAiApiKey')]" },
+                        { "name": "[variables('azureBlobSasUrlSecretRef')]", "value": "[parameters('azureBlobSasUrl')]" }
                     ],
                     "registries": [
                         {
@@ -195,7 +211,7 @@
                                 { "name": "GRAPH_TOKEN_BUFFER_SECONDS", "value": "60" },
                                
                                 { "name": "REDIS_HOST", "value": "[parameters('redisHost')]" },
-                                { "name": "REDIS_PORT", "value": "11749" },
+                                { "name": "REDIS_PORT", "value": "[parameters('redisPort')]" },
                                 { "name": "REDIS_USERNAME", "value": "default" },
                                 { "name": "REDIS_PASSWORD", "secretRef": "[variables('redisPasswordSecretRef')]" },
                                 { "name": "REDIS_SSL", "value": "false" },
@@ -206,7 +222,7 @@
                                
                                 { "name": "LANGCHAIN_TRACING_V2", "value": "true" },
                                 { "name": "LANGCHAIN_API_KEY", "secretRef": "[variables('langchainKeySecretRef')]" },
-                                { "name": "LANGCHAIN_PROJECT", "value": "document_intel" },
+                                { "name": "LANGCHAIN_PROJECT", "value": "[parameters('langchainProject')]" },
                                 { "name": "LANGCHAIN_ENDPOINT", "value": "https://api.smith.langchain.com" },
                                
                                 { "name": "MAX_TEAMS_MESSAGE", "value": "3600" },
@@ -228,6 +244,30 @@
                                
                                 { "name": "LOG_ENABLED", "value": "true" },
                                 { "name": "LOG_LEVEL", "value": "INFO" },
+                                { "name": "HTTP_TIMEOUT", "value": "30.0" },
+                                { "name": "RATE_LIMIT_SECONDS", "value": "3" },
+                                { "name": "MAX_TEMPLATE_TEXT_LENGTH", "value": "1000000" },
+                                { "name": "TEMPLATE_BLOB_PREFIX", "value": "templates/" },
+                                { "name": "OUTPUT_BLOB_PREFIX", "value": "output/" },
+                                { "name": "LIBREOFFICE_TIMEOUT", "value": "30" },
+                                { "name": "AZURE_BLOB_SAS_URL", "secretRef": "[variables('azureBlobSasUrlSecretRef')]" },
+                                { "name": "AZURE_BLOB_CONTAINER", "value": "[parameters('azureStorageContainerName')]" },
+                                { "name": "REDIS_URL", "value": "[parameters('redisHost')]" },
+                                { "name": "REDIS_KEY", "secretRef": "[variables('redisPasswordSecretRef')]" },
+                                { "name": "MAX_HISTORY", "value": "20" },
+                                { "name": "REDIS_TTL", "value": "3600" },
+                                { "name": "MAX_FILE_SIZE_MB", "value": "5" },
+                                { "name": "TEMPERATURE", "value": "0" },
+                                { "name": "TEMP_DIR", "value": "/tmp" },
+                                { "name": "SHAREPOINT_FOLDER_PATH", "value": "Shared Documents/Docgen Testing" },
+                                { "name": "BULK_MAX_CONCURRENCY", "value": "3" },
+                                { "name": "FUZZY_MATCH_THRESHOLD", "value": "0.85" },
+                                { "name": "COPILOT_FLOW_URL", "value": "https://placeholder-url.com" },
+                                { "name": "SHAREPOINT_SITE_URL", "value": "https://placeholder-site.com" },
+                                { "name": "AZURE_OPENAI_API_KEY", "secretRef": "[variables('azureOpenAiKeySecretRef')]" },
+                                { "name": "AZURE_OPENAI_ENDPOINT", "value": "[parameters('azureOpenAiEndpoint')]" },
+                                { "name": "AZURE_OPENAI_DEPLOYMENT_NAME", "value": "[parameters('azureOpenAiDeploymentName')]" },
+                                { "name": "AZURE_OPENAI_API_VERSION", "value": "[parameters('azureOpenAiApiVersion')]" },
                                 { "name": "ENFORCE_PII_COMPLIANCE", "value": "true" },
                                
                                 { "name": "DENSITY_MIN_ALPHABETIC_RATIO", "value": "0.3" },

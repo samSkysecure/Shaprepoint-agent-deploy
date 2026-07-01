@@ -214,8 +214,8 @@ document.addEventListener("DOMContentLoaded", () => {
         appendLog("Initializing deployment sequence...", "system");
 
         // Save slugs for the download link
-        currentAgentSlug = document.getElementById("agentSlug").value;
-        currentCustomerSlug = document.getElementById("customerSlug").value;
+        currentAgentSlug = "docgen";
+        currentCustomerSlug = "skysecure";
 
         // Build Payload
         const manual = manualInputToggle.checked;
@@ -232,7 +232,7 @@ document.addEventListener("DOMContentLoaded", () => {
             customerSlug: currentCustomerSlug,
             agentSlug: currentAgentSlug,
             resourceGroupName: rgName,
-            botDisplayName: document.getElementById("botDisplayName").value || ""
+            botDisplayName: "docgen agent"
         };
 
         try {
