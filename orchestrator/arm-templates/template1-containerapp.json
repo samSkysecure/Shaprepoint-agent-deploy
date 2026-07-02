@@ -42,6 +42,11 @@
             "type": "string",
             "metadata": { "description": "Customer Entra tenant ID" }
         },
+        "sharepointTenantId": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": { "description": "Tenant ID for SharePoint Graph API, defaults to customerTenantId if empty" }
+        },
         "msClientId": {
             "type": "string",
             "metadata": { "description": "Microsoft Graph Client ID" }
@@ -200,7 +205,7 @@
                                 { "name": "AZURE_DOCUMENT_INTEL_ENDPOINT", "value": "[parameters('azureDocumentIntelEndpoint')]" },
                                 { "name": "AZURE_DOCUMENT_INTEL_MODEL", "value": "prebuilt-layout" },
                                
-                                { "name": "MSTENANT_ID", "value": "[parameters('customerTenantId')]" },
+                                { "name": "MSTENANT_ID", "value": "[if(empty(parameters('sharepointTenantId')), parameters('customerTenantId'), parameters('sharepointTenantId'))]" },
                                 { "name": "MSCLIENT_ID", "value": "[parameters('msClientId')]" },
                                 { "name": "MSCLIENT_SECRET", "secretRef": "[variables('msClientSecretRef')]" },
                                 { "name": "MS_AUTHORITY_BASE", "value": "https://login.microsoftonline.com" },
@@ -264,6 +269,8 @@
                                 { "name": "FUZZY_MATCH_THRESHOLD", "value": "0.85" },
                                 { "name": "COPILOT_FLOW_URL", "value": "https://placeholder-url.com" },
                                 { "name": "SHAREPOINT_SITE_URL", "value": "https://placeholder-site.com" },
+                                { "name": "SHAREPOINT_TEMPLATES_LIBRARY", "value": "deployed template" },
+                                { "name": "SHAREPOINT_GENERATED_LIBRARY", "value": "Deployed document library" },
                                 { "name": "AZURE_OPENAI_API_KEY", "secretRef": "[variables('azureOpenAiKeySecretRef')]" },
                                 { "name": "AZURE_OPENAI_ENDPOINT", "value": "[parameters('azureOpenAiEndpoint')]" },
                                 { "name": "AZURE_OPENAI_DEPLOYMENT_NAME", "value": "[parameters('azureOpenAiDeploymentName')]" },

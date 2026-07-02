@@ -38,6 +38,12 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$SharePointSiteUrl,
 
+    # JSON array string of SharePoint site URLs to register as Copilot Studio
+    # Knowledge Sources, e.g. '["https://contoso.sharepoint.com/sites/HR","https://contoso.sharepoint.com/sites/IT"]'
+    # Distinct from -SharePointSiteUrl (which is the single Templates/Generated document library site).
+    [Parameter(Mandatory=$false)]
+    [string]$KnowledgeBaseSiteUrls = "[]",
+
     [Parameter(Mandatory=$false)]
     [string]$BotDisplayName,
 
@@ -140,6 +146,7 @@ $deployPayload = @{
     agent_image_tag = $AgentImageTag
     bot_display_name = $BotDisplayName
     bot_sku = "F0"
+    sharepoint_site_url = $SharePointSiteUrl
 } | ConvertTo-Json
 
 $deployResponse = Invoke-RestMethodWithDetails -Method Post -Uri "$OrchestratorUrl/deployments" -ContentType "application/json" -Body $deployPayload
@@ -182,6 +189,17 @@ if ($swaggerFile) {
     Write-Host "Warning: Could not find swagger file to inject host."
 }
 
+# Bump the solution version to force Power Platform to update components
+$solutionFile = Join-Path $unpackDir "solution.xml"
+if (Test-Path $solutionFile) {
+    [xml]$solXml = Get-Content $solutionFile -Raw
+    $timestamp = (Get-Date).ToString("MMddHHmm")
+    $newVersion = "1.0.0.$timestamp"
+    $solXml.ImportExportXml.SolutionManifest.Version = $newVersion
+    $solXml.Save($solutionFile)
+    Write-Host "Successfully bumped connector solution version to: $newVersion"
+}
+
 Write-Host "Repacking Connector Zip..."
 $injectedZipPath = ".\documentConnector_injected.zip"
 pac solution pack --zipfile $injectedZipPath --folder $unpackDir
@@ -191,6 +209,133 @@ if (-not (Test-Path $injectedZipPath)) {
     Write-Host "Warning: Failed to create injected zip. Falling back to original connector zip."
     $injectedZipPath = $ConnectorSolutionZipPath
 }
+
+# ---------------------------------------------------------
+# 3b. INJECT SHAREPOINT KNOWLEDGE SOURCES INTO AGENT SOLUTION
+# ---------------------------------------------------------
+Write-Host "`n[3b/6] Registering SharePoint Knowledge Base sources..."
+
+function Get-KbSchemaSuffix {
+    param([string]$Url)
+    # Mirror Copilot Studio's own naming convention (strip scheme/punctuation)
+    # but guarantee uniqueness + a safe length with a short hash suffix,
+    # since two different site URLs can otherwise sanitize to near-identical strings.
+    $stripped = $Url -replace '^https?://', '' -replace '[^a-zA-Z0-9]', ''
+    $stripped = $stripped.Substring(0, [Math]::Min(50, $stripped.Length))
+
+    $md5 = [System.Security.Cryptography.MD5]::Create()
+    $hashBytes = $md5.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Url))
+    $shortHash = -join ($hashBytes[0..3] | ForEach-Object { $_.ToString("x2") })
+
+    return "$stripped$shortHash"
+}
+
+$kbUrls = @()
+try {
+    $kbUrls = $KnowledgeBaseSiteUrls | ConvertFrom-Json
+} catch {
+    Write-Host "Warning: -KnowledgeBaseSiteUrls was not valid JSON. Treating as empty list."
+}
+if ($null -eq $kbUrls) { $kbUrls = @() }
+# ConvertFrom-Json on a single-element array can return a scalar, not an array - normalize.
+$kbUrls = @($kbUrls)
+
+$agentUnpackDir = ".\unpacked_agent_temp"
+if (Test-Path $agentUnpackDir) { Remove-Item $agentUnpackDir -Recurse -Force }
+
+Write-Host "Unpacking Agent Solution ($SolutionZipPath)..."
+pac solution unpack --zipfile $SolutionZipPath --folder $agentUnpackDir
+
+$botComponentsDir = Join-Path $agentUnpackDir "botcomponents"
+
+# Discover the bot's schema name from the existing botcomponents folder
+# (keeps this generic if the agent is ever re-published under a different name).
+$sampleComponent = Get-ChildItem -Path $botComponentsDir -Directory | Select-Object -First 1
+$botSchemaName = ($sampleComponent.Name -split '\.')[0]
+
+if (-not $botSchemaName) {
+    Write-Host "Warning: Could not resolve bot schema name from $botComponentsDir. Skipping KB step."
+} else {
+    Write-Host "Resolved bot schema name: $botSchemaName"
+
+    # --- ALWAYS strip existing KB source folders first (full replace, not additive) ---
+    # Detect by content (kind: KnowledgeSourceConfiguration), not just by URL, so this
+    # also cleans up anything baked in from manual Copilot Studio testing/edits.
+    $existingKbFolders = Get-ChildItem -Path $botComponentsDir -Directory | Where-Object {
+        $dataFile = Join-Path $_.FullName "data"
+        (Test-Path $dataFile) -and (Get-Content $dataFile -Raw) -match "kind:\s*KnowledgeSourceConfiguration"
+    }
+    foreach ($folder in $existingKbFolders) {
+        Write-Host "  - Removing existing KB source folder: $($folder.Name)"
+        Remove-Item $folder.FullName -Recurse -Force
+    }
+
+    # --- Write the desired list fresh ---
+    foreach ($kbUrl in $kbUrls) {
+        $kbUrl = $kbUrl.Trim()
+        if ([string]::IsNullOrWhiteSpace($kbUrl)) { continue }
+
+        $suffix = Get-KbSchemaSuffix -Url $kbUrl
+        $componentSchemaName = "$botSchemaName.topic.$suffix"
+        $componentDir = Join-Path $botComponentsDir $componentSchemaName
+
+        New-Item -ItemType Directory -Path $componentDir -Force | Out-Null
+
+        $botComponentXml = @"
+<botcomponent schemaname="$componentSchemaName">
+  <componenttype>16</componenttype>
+  <description>This knowledge source provides information found in $kbUrl.</description>
+  <iscustomizable>0</iscustomizable>
+  <n>$kbUrl</n>
+  <parentbotid>
+    <schemaname>$botSchemaName</schemaname>
+  </parentbotid>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+</botcomponent>
+"@
+        $kbData = @"
+kind: KnowledgeSourceConfiguration
+source:
+  kind: SharePointSearchSource
+  site: $kbUrl
+"@
+        Set-Content -Path (Join-Path $componentDir "botcomponent.xml") -Value $botComponentXml
+        Set-Content -Path (Join-Path $componentDir "data") -Value $kbData
+
+        Write-Host "  + Registered KB source: $kbUrl (schema: $componentSchemaName)"
+    }
+
+    if ($kbUrls.Count -eq 0) {
+        Write-Host "No Knowledge Base URLs supplied - agent will have zero KB sources."
+    }
+
+    # Bump the solution version to force Power Platform to update components
+    $solutionFile2 = Join-Path $agentUnpackDir "solution.xml"
+    if (Test-Path $solutionFile2) {
+        [xml]$solXml2 = Get-Content $solutionFile2 -Raw
+        $timestamp = (Get-Date).ToString("MMddHHmm")
+        $newVersion2 = "1.0.0.$timestamp"
+        $solXml2.ImportExportXml.SolutionManifest.Version = $newVersion2
+        $solXml2.Save($solutionFile2)
+        Write-Host "Successfully bumped agent solution version to: $newVersion2"
+    }
+
+    Write-Host "Repacking Agent Solution..."
+    $injectedAgentZipPath = ".\docgen_injected.zip"
+    pac solution pack --zipfile $injectedAgentZipPath --folder $agentUnpackDir
+
+    if (Test-Path $injectedAgentZipPath) {
+        # Downstream create-settings/import calls reference $SolutionZipPath,
+        # so repointing it here propagates automatically.
+        $SolutionZipPath = $injectedAgentZipPath
+        Write-Host "Agent solution now points to: $SolutionZipPath"
+    } else {
+        Write-Host "Warning: Failed to create injected agent zip. Falling back to original solution zip (no KB sources)."
+    }
+}
+
+Remove-Item $agentUnpackDir -Recurse -Force -ErrorAction SilentlyContinue
 
 # ---------------------------------------------------------
 # 4. IMPORT CONNECTOR SOLUTION
@@ -282,12 +427,24 @@ $putUri = "https://api.powerapps.com/providers/Microsoft.PowerApps/apis/$actualA
 Invoke-RestMethodWithDetails -Method Put -Uri $putUri -Headers $apiHeaders -Body ($customConnPayload | ConvertTo-Json -Depth 5) | Out-Null
 Write-Host "Custom Connector connection successfully created! ID: $customConnGuid"
 
+Write-Host "`nAuto-creating Microsoft Copilot Studio Connection..."
+$copilotConnGuid = [guid]::NewGuid().ToString("N")
+$copilotConnPayload = @{
+    properties = @{
+        displayName = "Microsoft Copilot Studio Connection"
+        environment = @{ name = $envGuid }
+    }
+}
+$copilotPutUri = "https://api.powerapps.com/providers/Microsoft.PowerApps/apis/shared_microsoftcopilotstudio/connections/$copilotConnGuid`?api-version=2020-06-01"
+Invoke-RestMethodWithDetails -Method Put -Uri $copilotPutUri -Headers $apiHeaders -Body ($copilotConnPayload | ConvertTo-Json -Depth 5) | Out-Null
+Write-Host "Microsoft Copilot Studio connection successfully created! ID: $copilotConnGuid"
+
 Write-Host "`nBinding Connections to settings.json..."
 foreach ($connRef in $settings.ConnectionReferences) {
     if ($connRef.ConnectorId -notmatch "shared_microsoftcopilotstudio") {
         $connRef.ConnectionId = $customConnGuid
     } else {
-        $connRef.ConnectionId = "" # Leave Copilot Studio unbound for user UI consent
+        $connRef.ConnectionId = $copilotConnGuid
     }
 }
 $settings | ConvertTo-Json -Depth 10 | Set-Content ".\settings.json"

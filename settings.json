@@ -5,27 +5,27 @@
     "ConnectionReferences":  [
                                  {
                                      "LogicalName":  "crdba_DocumentGenerationAgent.shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94.3c21117fee6b4ad28d5db2e8b85f976a",
-                                     "ConnectionId":  "c992fb93bc494a27a14a78fdb8973402",
+                                     "ConnectionId":  "1b77224c8fd84f668ef1bc3cbe6e5014",
                                      "ConnectorId":  "/providers/Microsoft.PowerApps/apis/shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94"
                                  },
                                  {
                                      "LogicalName":  "crdba_DocumentGenerationAgent.shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94.8f72b91225f749d39ef9d96f9bc7bcee",
-                                     "ConnectionId":  "c992fb93bc494a27a14a78fdb8973402",
+                                     "ConnectionId":  "1b77224c8fd84f668ef1bc3cbe6e5014",
                                      "ConnectorId":  "/providers/Microsoft.PowerApps/apis/shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94"
                                  },
                                  {
                                      "LogicalName":  "crdba_DocumentGenerationAgent.shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94.91dea5dd5538446d917fb0e119f8025f",
-                                     "ConnectionId":  "c992fb93bc494a27a14a78fdb8973402",
+                                     "ConnectionId":  "1b77224c8fd84f668ef1bc3cbe6e5014",
                                      "ConnectorId":  "/providers/Microsoft.PowerApps/apis/shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94"
                                  },
                                  {
                                      "LogicalName":  "crdba_DocumentGenerationAgent.shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94.99327e843ce441d3aab686606541b8c0",
-                                     "ConnectionId":  "c992fb93bc494a27a14a78fdb8973402",
+                                     "ConnectionId":  "1b77224c8fd84f668ef1bc3cbe6e5014",
                                      "ConnectorId":  "/providers/Microsoft.PowerApps/apis/shared_docgen-20sharepoint-20connector-5fbf3dda69cfd48-ea517f9fdcb14e94"
                                  },
                                  {
                                      "LogicalName":  "new_sharedmicrosoftcopilotstudio_656fe",
-                                     "ConnectionId":  "",
+                                     "ConnectionId":  "aee7d7c1788c409f965e0104c47210f1",
                                      "ConnectorId":  "/providers/Microsoft.PowerApps/apis/shared_microsoftcopilotstudio"
                                  }
                              ],

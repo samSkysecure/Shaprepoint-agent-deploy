@@ -5,26 +5,14 @@ Standalone SharePoint client for Skysecure Container App agents.
 
 Responsibilities:
   - Authenticate to Microsoft Graph using the SPN credentials already
-    present as env vars (MSTENANT_ID, MSCLIENT_ID, MSCLIENT_SECRET).
+    present as env vars (MSTENANT_ID, MSCLIENT_ID, MSCLIENT_SECRET) or passed in.
   - On first use, ensure the customer's SharePoint site has the expected
-    document library structure (Templates, Generated). Creates them if missing.
+    document library structure (Templates, Generated) and lists (Deployed Lists).
+    Creates them if missing.
   - Download template files from the Templates library.
   - Upload generated documents to the Generated library.
   - List files in either library.
   - Delete files from either library.
-
-Environment variables required:
-  MSTENANT_ID                  - Customer tenant ID (GUID)
-  MSCLIENT_ID                  - SPN client ID
-  MSCLIENT_SECRET              - SPN client secret
-  SHAREPOINT_SITE_URL          - Full URL of the customer SharePoint site
-                                 e.g. https://contoso.sharepoint.com/sites/hr-docgen
-                                 Set by the frontend onboarding flow.
-
-Optional:
-  SHAREPOINT_TEMPLATES_LIBRARY - Library name for templates (default: Templates)
-  SHAREPOINT_GENERATED_LIBRARY - Library name for generated docs (default: Generated)
-  GRAPH_TOKEN_BUFFER_SECONDS   - Seconds before expiry to refresh token (default: 60)
 """
 
 import os
@@ -46,139 +34,12 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
-TEMPLATES_LIBRARY = os.getenv("SHAREPOINT_TEMPLATES_LIBRARY", "Templates")
-GENERATED_LIBRARY = os.getenv("SHAREPOINT_GENERATED_LIBRARY", "Generated")
+TEMPLATES_LIBRARY = os.getenv("SHAREPOINT_TEMPLATES_LIBRARY", "deployed template")
+GENERATED_LIBRARY = os.getenv("SHAREPOINT_GENERATED_LIBRARY", "Deployed document library")
 TOKEN_BUFFER = int(os.getenv("GRAPH_TOKEN_BUFFER_SECONDS", "60"))
 
-
-# ---------------------------------------------------------------------------
-# Internal token cache (module-level, per process)
-# ---------------------------------------------------------------------------
-
-_token_cache: dict = {
-    "access_token": None,
-    "expires_at": 0.0,
-}
-
-
-def _get_graph_token() -> str:
-    """
-    Returns a valid Graph access token, refreshing if expired or close to expiry.
-    Uses client credentials flow with the SPN creds from env vars.
-    """
-    now = time.time()
-    if _token_cache["access_token"] and now < _token_cache["expires_at"] - TOKEN_BUFFER:
-        return _token_cache["access_token"]
-
-    tenant_id = _require_env("MSTENANT_ID")
-    client_id = _require_env("MSCLIENT_ID")
-    client_secret = _require_env("MSCLIENT_SECRET")
-
-    url = TOKEN_URL_TEMPLATE.format(tenant_id=tenant_id)
-    response = httpx.post(
-        url,
-        data={
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scope": GRAPH_SCOPE,
-        },
-        timeout=30,
-    )
-    _raise_for_graph_error(response, context="token acquisition")
-
-    data = response.json()
-    _token_cache["access_token"] = data["access_token"]
-    _token_cache["expires_at"] = now + int(data.get("expires_in", 3600))
-
-    logger.debug("Graph token refreshed, expires in %ss", data.get("expires_in"))
-    return _token_cache["access_token"]
-
-
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {_get_graph_token()}",
-        "Content-Type": "application/json",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Site resolution
-# ---------------------------------------------------------------------------
-
-def _parse_site_url(site_url: str) -> tuple[str, str]:
-    """
-    Parses a SharePoint site URL into (hostname, site_path).
-    e.g. https://contoso.sharepoint.com/sites/hr-docgen
-      -> ("contoso.sharepoint.com", "/sites/hr-docgen")
-    """
-    parsed = urlparse(site_url.rstrip("/"))
-    return parsed.hostname, parsed.path
-
-
-def _get_site_id(site_url: str) -> str:
-    """
-    Resolves a SharePoint site URL to its Graph site ID.
-    Caches the result on the SharePointClient instance that calls this.
-    """
-    hostname, path = _parse_site_url(site_url)
-    # Graph endpoint: /sites/{hostname}:{path}
-    encoded_path = quote(path, safe="/")
-    url = f"{GRAPH_BASE}/sites/{hostname}:{encoded_path}"
-
-    response = httpx.get(url, headers=_headers(), timeout=30)
-    _raise_for_graph_error(response, context=f"resolving site {site_url}")
-
-    site_id = response.json()["id"]
-    logger.debug("Resolved site ID: %s", site_id)
-    return site_id
-
-
-# ---------------------------------------------------------------------------
-# Library helpers
-# ---------------------------------------------------------------------------
-
-def _list_drives(site_id: str) -> list[dict]:
-    url = f"{GRAPH_BASE}/sites/{site_id}/drives"
-    response = httpx.get(url, headers=_headers(), timeout=30)
-    _raise_for_graph_error(response, context="listing drives")
-    return response.json().get("value", [])
-
-
-def _get_or_create_library(site_id: str, library_name: str) -> str:
-    """
-    Returns the drive ID for the named document library.
-    Creates the library if it does not exist.
-    """
-    drives = _list_drives(site_id)
-    existing = next((d for d in drives if d["name"] == library_name), None)
-
-    if existing:
-        logger.debug("Library '%s' found, drive ID: %s", library_name, existing["id"])
-        return existing["id"]
-
-    # Create the document library
-    logger.info("Library '%s' not found — creating it.", library_name)
-    url = f"{GRAPH_BASE}/sites/{site_id}/lists"
-    payload = {
-        "displayName": library_name,
-        "list": {"template": "documentLibrary"},
-    }
-    response = httpx.post(url, headers=_headers(), json=payload, timeout=30)
-    _raise_for_graph_error(response, context=f"creating library '{library_name}'")
-
-    # The list creation returns a list object, not a drive.
-    # Fetch drives again to get the drive ID for the new library.
-    drives = _list_drives(site_id)
-    created = next((d for d in drives if d["name"] == library_name), None)
-    if not created:
-        raise SharePointError(
-            f"Library '{library_name}' was created but could not be found in drives. "
-            "This can happen if SharePoint provisioning is still in progress — retry in a few seconds."
-        )
-
-    logger.info("Library '%s' created, drive ID: %s", library_name, created["id"])
-    return created["id"]
+# Global token cache (indexed by (tenant_id, client_id))
+_token_cache: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -188,20 +49,77 @@ def _get_or_create_library(site_id: str, library_name: str) -> str:
 class SharePointClient:
     """
     Stateful client for a single customer SharePoint site.
-    Resolves the site and library IDs on first use and caches them
+    Resolves the site, library, and list IDs on first use and caches them
     for the lifetime of the instance.
 
     Usage:
-        client = SharePointClient()  # reads SHAREPOINT_SITE_URL from env
-        content = client.download_template("offer_letter.docx")
-        client.upload_generated("john_doe_offer.docx", content)
+        client = SharePointClient()  # reads from env vars
+        # Or pass credentials dynamically:
+        client = SharePointClient(site_url, tenant_id, client_id, client_secret)
+        
+        structure = client.ensure_structure()
     """
 
-    def __init__(self, site_url: Optional[str] = None):
-        self.site_url = (site_url or _require_env("SHAREPOINT_SITE_URL")).rstrip("/")
+    def __init__(
+        self,
+        site_url: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+    ):
+        self.site_url = (site_url or os.getenv("SHAREPOINT_SITE_URL") or _require_env("SHAREPOINT_SITE_URL")).rstrip("/")
+        self.tenant_id = tenant_id or os.getenv("MSTENANT_ID") or _require_env("MSTENANT_ID")
+        self.client_id = client_id or os.getenv("MSCLIENT_ID") or _require_env("MSCLIENT_ID")
+        self.client_secret = client_secret or os.getenv("MSCLIENT_SECRET") or _require_env("MSCLIENT_SECRET")
+
         self._site_id: Optional[str] = None
         self._template_drive_id: Optional[str] = None
         self._generated_drive_id: Optional[str] = None
+        self._deployed_lists_id: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Authentication & headers
+    # ------------------------------------------------------------------
+
+    def _get_graph_token(self) -> str:
+        """
+        Returns a valid Graph access token, refreshing if expired or close to expiry.
+        Uses client credentials flow with self.tenant_id, client_id, client_secret.
+        """
+        key = (self.tenant_id, self.client_id)
+        now = time.time()
+        
+        if key in _token_cache:
+            token, expires_at = _token_cache[key]
+            if now < expires_at - TOKEN_BUFFER:
+                return token
+
+        url = TOKEN_URL_TEMPLATE.format(tenant_id=self.tenant_id)
+        response = httpx.post(
+            url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "scope": GRAPH_SCOPE,
+            },
+            timeout=30,
+        )
+        _raise_for_graph_error(response, context="token acquisition")
+
+        data = response.json()
+        token = data["access_token"]
+        expires_at = now + int(data.get("expires_in", 3600))
+        _token_cache[key] = (token, expires_at)
+
+        logger.debug("Graph token refreshed for client %s, expires in %ss", self.client_id, data.get("expires_in"))
+        return token
+
+    def _headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self._get_graph_token()}",
+            "Content-Type": "application/json",
+        }
 
     # ------------------------------------------------------------------
     # Lazy initialisation — resolves IDs on first use
@@ -211,13 +129,15 @@ class SharePointClient:
         if self._site_id is not None:
             return
         logger.info("Initialising SharePoint client for site: %s", self.site_url)
-        self._site_id = _get_site_id(self.site_url)
-        self._template_drive_id = _get_or_create_library(self._site_id, TEMPLATES_LIBRARY)
-        self._generated_drive_id = _get_or_create_library(self._site_id, GENERATED_LIBRARY)
+        self._site_id = self._get_site_id()
+        self._template_drive_id = self._get_or_create_library(TEMPLATES_LIBRARY)
+        self._generated_drive_id = self._get_or_create_library(GENERATED_LIBRARY)
+        self._deployed_lists_id = self._get_or_create_deployed_lists("Deployed Lists")
         logger.info(
-            "SharePoint client ready. Templates drive: %s | Generated drive: %s",
+            "SharePoint client ready. Templates drive: %s | Generated drive: %s | Deployed Lists: %s",
             self._template_drive_id,
             self._generated_drive_id,
+            self._deployed_lists_id,
         )
 
     @property
@@ -235,6 +155,144 @@ class SharePointClient:
         self._ensure_initialised()
         return self._generated_drive_id
 
+    @property
+    def deployed_lists_id(self) -> str:
+        self._ensure_initialised()
+        return self._deployed_lists_id
+
+    # ------------------------------------------------------------------
+    # Site resolution
+    # ------------------------------------------------------------------
+
+    def _get_site_id(self) -> str:
+        """Resolves the site URL to its Graph site ID."""
+        parsed = urlparse(self.site_url)
+        hostname = parsed.hostname
+        path = parsed.path
+        
+        encoded_path = quote(path, safe="/")
+        url = f"{GRAPH_BASE}/sites/{hostname}:{encoded_path}"
+
+        response = httpx.get(url, headers=self._headers(), timeout=30)
+        _raise_for_graph_error(response, context=f"resolving site {self.site_url}")
+
+        site_id = response.json()["id"]
+        logger.debug("Resolved site ID: %s", site_id)
+        return site_id
+
+    # ------------------------------------------------------------------
+    # Library setup helpers
+    # ------------------------------------------------------------------
+
+    def _list_drives(self) -> list[dict]:
+        url = f"{GRAPH_BASE}/sites/{self._site_id}/drives"
+        response = httpx.get(url, headers=self._headers(), timeout=30)
+        _raise_for_graph_error(response, context="listing drives")
+        return response.json().get("value", [])
+
+    def _get_or_create_library(self, library_name: str) -> str:
+        """
+        Returns the drive ID for the named document library.
+        Creates the library if it does not exist.
+        """
+        drives = self._list_drives()
+        existing = next((d for d in drives if d["name"] == library_name), None)
+
+        if existing:
+            logger.debug("Library '%s' found, drive ID: %s", library_name, existing["id"])
+            return existing["id"]
+
+        # Create the document library
+        logger.info("Library '%s' not found — creating it.", library_name)
+        url = f"{GRAPH_BASE}/sites/{self._site_id}/lists"
+        payload = {
+            "displayName": library_name,
+            "list": {"template": "documentLibrary"},
+        }
+        response = httpx.post(url, headers=self._headers(), json=payload, timeout=30)
+        _raise_for_graph_error(response, context=f"creating library '{library_name}'")
+
+        # The list creation returns a list object, not a drive.
+        # Fetch drives again to get the drive ID for the new library.
+        for attempt in range(6):
+            time.sleep(3)
+            drives = self._list_drives()
+            created = next((d for d in drives if d["name"] == library_name), None)
+            if created:
+                logger.info("Library '%s' created, drive ID: %s", library_name, created["id"])
+                return created["id"]
+            logger.debug("Waiting for library '%s' to appear in drives... attempt %d/6", library_name, attempt + 1)
+
+        raise SharePointError(
+            f"Library '{library_name}' was created but could not be found in drives. "
+            "This can happen if SharePoint provisioning is still in progress — retry in a few seconds."
+        )
+
+    # ------------------------------------------------------------------
+    # Custom List setup helpers
+    # ------------------------------------------------------------------
+
+    def _get_or_create_deployed_lists(self, list_name: str) -> str:
+        """
+        Returns the list ID for the custom SharePoint list.
+        Creates the list with specific columns if it does not exist.
+        """
+        url = f"{GRAPH_BASE}/sites/{self._site_id}/lists"
+        response = httpx.get(url, headers=self._headers(), timeout=30)
+        _raise_for_graph_error(response, context="listing lists")
+
+        lists = response.json().get("value", [])
+        existing = next((l for l in lists if l["displayName"] == list_name), None)
+
+        if existing:
+            logger.debug("List '%s' found, list ID: %s", list_name, existing["id"])
+            return existing["id"]
+
+        # Create the list with columns
+        logger.info("List '%s' not found — creating it with custom columns.", list_name)
+        
+        columns_schema = [
+            {"name": "TicketID", "text": {}},
+            {"name": "Description", "text": {"allowMultipleLines": True}},
+            {"name": "AssignedCategory", "text": {}},
+            {
+                "name": "Priority",
+                "choice": {
+                    "choices": ["Low", "Medium", "High"],
+                    "allowTextEntry": False
+                }
+            },
+            {
+                "name": "Status",
+                "choice": {
+                    "choices": ["New", "Active", "Resolved", "Closed"],
+                    "allowTextEntry": False
+                }
+            },
+            {"name": "CreatedByAadId", "text": {}},
+            {"name": "AssignedTo", "text": {}},
+            {"name": "ScreenshotLink", "hyperlinkOrPicture": {}},
+            {"name": "SubmitterEmail", "text": {}}
+        ]
+
+        create_response = httpx.post(
+            url,
+            headers=self._headers(),
+            json={
+                "displayName": list_name,
+                "columns": columns_schema,
+                "list": {
+                    "template": "genericList"
+                }
+            },
+            timeout=30,
+        )
+        _raise_for_graph_error(create_response, context=f"creating list '{list_name}'")
+
+        created_list = create_response.json()
+        logger.info("List '%s' created successfully. List ID: %s", list_name, created_list["id"])
+        return created_list["id"]
+
     # ------------------------------------------------------------------
     # Templates library
     # ------------------------------------------------------------------
@@ -242,16 +300,9 @@ class SharePointClient:
     def list_templates(self) -> list[dict]:
         """
         Lists all files in the Templates library.
-
-        Returns a list of dicts, each with:
-          - name        (str)  filename
-          - id          (str)  Graph item ID
-          - size        (int)  bytes
-          - modified    (str)  ISO 8601 last modified datetime
-          - download_url (str) pre-authenticated download URL (valid ~1hr)
         """
         url = f"{GRAPH_BASE}/drives/{self.template_drive_id}/root/children"
-        response = httpx.get(url, headers=_headers(), timeout=30)
+        response = httpx.get(url, headers=self._headers(), timeout=30)
         _raise_for_graph_error(response, context="listing templates")
 
         return [
@@ -269,7 +320,6 @@ class SharePointClient:
     def download_template(self, filename: str) -> bytes:
         """
         Downloads a template file by name from the Templates library.
-        Raises SharePointFileNotFoundError if the file does not exist.
         """
         self._ensure_initialised()
         encoded = quote(filename)
@@ -277,7 +327,7 @@ class SharePointClient:
 
         response = httpx.get(
             url,
-            headers={"Authorization": f"Bearer {_get_graph_token()}"},
+            headers={"Authorization": f"Bearer {self._get_graph_token()}"},
             follow_redirects=True,
             timeout=60,
         )
@@ -293,9 +343,6 @@ class SharePointClient:
     def upload_template(self, filename: str, content: bytes) -> dict:
         """
         Uploads a file to the Templates library.
-        Overwrites if a file with the same name already exists.
-
-        Returns the Graph driveItem dict for the uploaded file.
         """
         return self._upload(self.template_drive_id, filename, content, context="template")
 
@@ -306,10 +353,9 @@ class SharePointClient:
     def list_generated(self) -> list[dict]:
         """
         Lists all files in the Generated library.
-        Same return shape as list_templates().
         """
         url = f"{GRAPH_BASE}/drives/{self.generated_drive_id}/root/children"
-        response = httpx.get(url, headers=_headers(), timeout=30)
+        response = httpx.get(url, headers=self._headers(), timeout=30)
         _raise_for_graph_error(response, context="listing generated docs")
 
         return [
@@ -327,16 +373,12 @@ class SharePointClient:
     def upload_generated(self, filename: str, content: bytes) -> dict:
         """
         Uploads a generated document to the Generated library.
-        Overwrites if a file with the same name already exists.
-
-        Returns the Graph driveItem dict for the uploaded file.
         """
         return self._upload(self.generated_drive_id, filename, content, context="generated doc")
 
     def download_generated(self, filename: str) -> bytes:
         """
         Downloads a previously generated document by name.
-        Raises SharePointFileNotFoundError if not found.
         """
         self._ensure_initialised()
         encoded = quote(filename)
@@ -344,7 +386,7 @@ class SharePointClient:
 
         response = httpx.get(
             url,
-            headers={"Authorization": f"Bearer {_get_graph_token()}"},
+            headers={"Authorization": f"Bearer {self._get_graph_token()}"},
             follow_redirects=True,
             timeout=60,
         )
@@ -373,11 +415,11 @@ class SharePointClient:
 
     def ensure_structure(self) -> dict:
         """
-        Ensures the Templates and Generated libraries exist on the site.
+        Ensures the Templates, Generated libraries, and Deployed Lists exist on the site.
         Safe to call on every agent startup — is a no-op if already present.
 
         Returns a dict with the resolved IDs for logging/debugging:
-          { site_id, template_drive_id, generated_drive_id, site_url }
+          { site_id, template_drive_id, generated_drive_id, deployed_lists_id, site_url }
         """
         self._ensure_initialised()
         return {
@@ -385,6 +427,7 @@ class SharePointClient:
             "site_id": self._site_id,
             "template_drive_id": self._template_drive_id,
             "generated_drive_id": self._generated_drive_id,
+            "deployed_lists_id": self._deployed_lists_id,
         }
 
     # ------------------------------------------------------------------
@@ -392,20 +435,15 @@ class SharePointClient:
     # ------------------------------------------------------------------
 
     def _upload(self, drive_id: str, filename: str, content: bytes, context: str) -> dict:
-        """
-        Uploads content to a drive using the Graph upload session API.
-        Handles files of any size (uses simple PUT for <4MB, session for larger).
-        """
         self._ensure_initialised()
         encoded = quote(filename)
 
         if len(content) < 4 * 1024 * 1024:
-            # Simple upload for files under 4MB
             url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/content"
             response = httpx.put(
                 url,
                 headers={
-                    "Authorization": f"Bearer {_get_graph_token()}",
+                    "Authorization": f"Bearer {self._get_graph_token()}",
                     "Content-Type": _mime_type(filename),
                 },
                 content=content,
@@ -416,7 +454,6 @@ class SharePointClient:
             return response.json()
 
         else:
-            # Upload session for larger files
             session_url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/createUploadSession"
             session_payload = {
                 "item": {
@@ -426,14 +463,13 @@ class SharePointClient:
             }
             session_response = httpx.post(
                 session_url,
-                headers=_headers(),
+                headers=self._headers(),
                 json=session_payload,
                 timeout=30,
             )
             _raise_for_graph_error(session_response, context="creating upload session")
             upload_url = session_response.json()["uploadUrl"]
 
-            # Upload in 4MB chunks
             chunk_size = 4 * 1024 * 1024
             total = len(content)
             offset = 0
@@ -466,7 +502,7 @@ class SharePointClient:
         url = f"{GRAPH_BASE}/drives/{drive_id}/root:/{encoded}"
         response = httpx.delete(
             url,
-            headers={"Authorization": f"Bearer {_get_graph_token()}"},
+            headers={"Authorization": f"Bearer {self._get_graph_token()}"},
             timeout=30,
         )
         if response.status_code == 404:

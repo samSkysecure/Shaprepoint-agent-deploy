@@ -222,11 +222,19 @@ document.addEventListener("DOMContentLoaded", () => {
         const subId = manual ? subscriptionIdInput.value.trim() : subscriptionIdSelect.value;
         const rgName = manual ? resourceGroupNameInput.value.trim() : resourceGroupNameSelect.value;
 
+        const kbUrlsRaw = document.getElementById("knowledgeBaseSiteUrls").value.trim();
+        let kbUrlsArray = [];
+        if (kbUrlsRaw) {
+            kbUrlsArray = kbUrlsRaw.split(",").map(url => url.trim()).filter(url => url.length > 0);
+        }
+        const kbUrlsJson = JSON.stringify(kbUrlsArray);
+
         const payload = {
             tenantId: tenantIdInput.value.trim(),
             subscriptionId: subId,
             environmentId: document.getElementById("environmentId").value,
             sharePointSiteUrl: document.getElementById("sharePointSiteUrl").value,
+            knowledgeBaseSiteUrls: kbUrlsJson,
             connectorSolutionZip: "docgenConnector_1_0_0_2.zip",
             solutionZip: "docgen_1_0_0_2.zip",
             customerSlug: currentCustomerSlug,

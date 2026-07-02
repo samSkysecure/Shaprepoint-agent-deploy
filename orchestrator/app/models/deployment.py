@@ -73,3 +73,4 @@ class DeploymentRecord(BaseModel):
     sharepoint_site_id: Optional[str] = None
     sharepoint_templates_drive_id: Optional[str] = None
     sharepoint_generated_drive_id: Optional[str] = None
+    sharepoint_deployed_lists_id: Optional[str] = None

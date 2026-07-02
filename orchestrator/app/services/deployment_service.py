@@ -17,6 +17,7 @@ from app.core.config import Settings
 from app.models.deployment import DeploymentRecord, DeploymentStatus, StepResult
 from app.services.azure_client import ArmDeploymentError, AzureDeploymentClient
 from app.services.teams_manifest import generate_and_zip_manifest
+from app.services.sharepoint import SharePointClient
 
 logger = logging.getLogger("orchestrator.deployment_service")
 
@@ -75,23 +76,26 @@ def _step_provision_sharepoint(
 
     logger.info("Provisioning SharePoint structure on site: %s", site_url)
 
-    token = _get_graph_token(settings, req.customer_tenant_id)
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-
-    # Resolve site ID from URL
-    site_id = _resolve_site_id(site_url, headers)
-
-    # Ensure Templates and Generated libraries exist
-    templates_drive_id = _get_or_create_library(site_id, "Templates", headers)
-    generated_drive_id = _get_or_create_library(site_id, "Generated", headers)
+    # Use the refactored SharePointClient to provision site structure
+    client = SharePointClient(
+        site_url=site_url,
+        tenant_id="d7ab1225-4649-4cb3-abd5-bc732bed3203",  # Hardcoded to SST Lab tenant
+        client_id=settings.skysecure_app_id,
+        client_secret=settings.skysecure_app_secret,
+    )
+    
+    structure = client.ensure_structure()
+    
+    site_id = structure["site_id"]
+    templates_drive_id = structure["template_drive_id"]
+    generated_drive_id = structure["generated_drive_id"]
+    deployed_lists_id = structure["deployed_lists_id"]
 
     # Store on record so they can be injected into Container App env vars
     record.sharepoint_site_id = site_id
     record.sharepoint_templates_drive_id = templates_drive_id
     record.sharepoint_generated_drive_id = generated_drive_id
+    record.sharepoint_deployed_lists_id = deployed_lists_id
 
     record.steps.append(StepResult(
         step="provision_sharepoint",
@@ -101,127 +105,14 @@ def _step_provision_sharepoint(
             "site_id": site_id,
             "templates_drive_id": templates_drive_id,
             "generated_drive_id": generated_drive_id,
+            "deployed_lists_id": deployed_lists_id,
         },
         detail=_timestamp(),
     ))
     logger.info(
-        "SharePoint provisioned. Site: %s | Templates: %s | Generated: %s",
-        site_id, templates_drive_id, generated_drive_id,
+        "SharePoint provisioned. Site: %s | Templates: %s | Generated: %s | Deployed Lists: %s",
+        site_id, templates_drive_id, generated_drive_id, deployed_lists_id,
     )
-
-
-def _get_graph_token(settings: Settings, tenant_id: str) -> str:
-    """Acquire a Graph API token using the SPN client credentials."""
-    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    response = httpx.post(
-        url,
-        data={
-            "grant_type": "client_credentials",
-            "client_id": settings.skysecure_app_id,
-            "client_secret": settings.skysecure_app_secret,
-            "scope": "https://graph.microsoft.com/.default",
-        },
-        timeout=30,
-    )
-    if response.status_code != 200:
-        raise SharePointProvisioningError(
-            f"Failed to acquire Graph token. Status: {response.status_code}. "
-            f"Detail: {response.text}"
-        )
-    return response.json()["access_token"]
-
-
-def _resolve_site_id(site_url: str, headers: dict) -> str:
-    """Resolve a SharePoint site URL to its Graph site ID."""
-    parsed = urlparse(site_url)
-    hostname = parsed.hostname
-    path = quote(parsed.path, safe="/")
-
-    url = f"{GRAPH_BASE}/sites/{hostname}:{path}"
-    response = httpx.get(url, headers=headers, timeout=30)
-
-    if response.status_code == 404:
-        raise SharePointProvisioningError(
-            f"SharePoint site not found: {site_url}. "
-            "Verify the URL is correct and the SPN has Sites.ReadWrite.All permission."
-        )
-    if response.status_code != 200:
-        raise SharePointProvisioningError(
-            f"Failed to resolve site ID for {site_url}. "
-            f"Status: {response.status_code}. Detail: {response.text}"
-        )
-
-    site_id = response.json()["id"]
-    logger.debug("Resolved site ID: %s", site_id)
-    return site_id
-
-
-def _get_or_create_library(site_id: str, library_name: str, headers: dict) -> str:
-    """
-    Returns the drive ID for the named document library.
-    Creates the library if it does not exist.
-    """
-    # Check if library already exists
-    drives_response = httpx.get(
-        f"{GRAPH_BASE}/sites/{site_id}/drives",
-        headers=headers,
-        timeout=30,
-    )
-    if drives_response.status_code != 200:
-        raise SharePointProvisioningError(
-            f"Failed to list drives on site {site_id}. "
-            f"Status: {drives_response.status_code}. Detail: {drives_response.text}"
-        )
-
-    drives = drives_response.json().get("value", [])
-    existing = next((d for d in drives if d["name"] == library_name), None)
-
-    if existing:
-        logger.info("Library '%s' already exists. Drive ID: %s", library_name, existing["id"])
-        return existing["id"]
-
-    # Create the document library
-    logger.info("Library '%s' not found — creating it.", library_name)
-    create_response = httpx.post(
-        f"{GRAPH_BASE}/sites/{site_id}/lists",
-        headers=headers,
-        json={
-            "displayName": library_name,
-            "list": {"template": "documentLibrary"},
-        },
-        timeout=30,
-    )
-    if create_response.status_code not in (200, 201):
-        raise SharePointProvisioningError(
-            f"Failed to create library '{library_name}'. "
-            f"Status: {create_response.status_code}. Detail: {create_response.text}"
-        )
-
-    # Re-fetch drives to get the drive ID of the newly created library
-    # (list creation returns a list object, not a drive)
-    for attempt in range(6):
-        time.sleep(5)
-        drives_response = httpx.get(
-            f"{GRAPH_BASE}/sites/{site_id}/drives",
-            headers=headers,
-            timeout=30,
-        )
-        drives = drives_response.json().get("value", [])
-        created = next((d for d in drives if d["name"] == library_name), None)
-        if created:
-            logger.info("Library '%s' created. Drive ID: %s", library_name, created["id"])
-            return created["id"]
-        logger.debug("Waiting for library '%s' to appear... attempt %d/6", library_name, attempt + 1)
-
-    raise SharePointProvisioningError(
-        f"Library '{library_name}' was created but did not appear in drives after 30s. "
-        "This is a SharePoint provisioning delay — retry the deployment."
-    )
-
-
-class SharePointProvisioningError(Exception):
-    """Raised when SharePoint library provisioning fails."""
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +146,7 @@ def _step_deploy_container_app(
         "microsoftAppId": settings.skysecure_app_id,
         "microsoftAppPassword": settings.skysecure_app_secret,
         "customerTenantId": req.customer_tenant_id,
+        "sharepointTenantId": "d7ab1225-4649-4cb3-abd5-bc732bed3203",
         "msClientId": settings.skysecure_app_id,
         "msClientSecret": settings.skysecure_app_secret,
         "redisHost": settings.REDIS_HOST,

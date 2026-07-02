@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 import os
+from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -24,6 +25,7 @@ class OnboardRequest(BaseModel):
     resourceGroupName: str
     sharePointSiteUrl: str
     botDisplayName: str
+    knowledgeBaseSiteUrls: Optional[str] = None
 
 @router.post("/api/onboard")
 async def start_onboarding(req: OnboardRequest):
@@ -80,6 +82,9 @@ async def run_powershell_script(task_id: str, req: OnboardRequest):
         "-SharePointSiteUrl", req.sharePointSiteUrl
     ]
     
+    if req.knowledgeBaseSiteUrls:
+        cmd.extend(["-KnowledgeBaseSiteUrls", req.knowledgeBaseSiteUrls])
+        
     if req.botDisplayName:
         cmd.extend(["-BotDisplayName", req.botDisplayName])
     

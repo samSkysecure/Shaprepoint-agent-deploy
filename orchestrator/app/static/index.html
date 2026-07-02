@@ -97,8 +97,12 @@
                             <input type="text" id="environmentId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
                         </div>
                         <div class="form-group">
-                            <label>SharePoint Site URL</label>
+                            <label>SharePoint Document Library (DB) Site URL</label>
                             <input type="url" id="sharePointSiteUrl" placeholder="https://contoso.sharepoint.com/sites/your-site" required>
+                        </div>
+                        <div class="form-group">
+                            <label>SharePoint Knowledge Base (KB) Site URLs (comma-separated)</label>
+                            <input type="text" id="knowledgeBaseSiteUrls" placeholder="https://contoso.sharepoint.com/sites/hr, https://contoso.sharepoint.com/sites/it">
                         </div>
 
                         <button type="submit" id="deploy-btn" class="btn-primary">
